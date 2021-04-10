@@ -127,7 +127,7 @@ func Display() bool {
 	// initial draw
 	header.Align()
 	status.Align()
-	cursor.RefreshContainers()
+	_, _ = cursor.RefreshContainers()
 	RedrawRows(true)
 
 	HandleKeys("up", cursor.Up)

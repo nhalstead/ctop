@@ -6,28 +6,28 @@ import (
 
 // Common action keybindings
 var keyMap = map[string][]string{
-	"up": []string{
+	"up": {
 		"/sys/kbd/<up>",
 		"/sys/kbd/k",
 	},
-	"down": []string{
+	"down": {
 		"/sys/kbd/<down>",
 		"/sys/kbd/j",
 	},
-	"pgup": []string{
+	"pgup": {
 		"/sys/kbd/<previous>",
 		"/sys/kbd/C-<up>",
 	},
-	"pgdown": []string{
+	"pgdown": {
 		"/sys/kbd/<next>",
 		"/sys/kbd/C-<down>",
 	},
-	"exit": []string{
+	"exit": {
 		"/sys/kbd/q",
 		"/sys/kbd/C-c",
 		"/sys/kbd/<escape>",
-	},
-	"help": []string{
+		},
+	"help": {
 		"/sys/kbd/h",
 		"/sys/kbd/?",
 	},
