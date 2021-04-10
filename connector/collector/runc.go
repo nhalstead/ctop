@@ -5,10 +5,11 @@ package collector
 import (
 	"time"
 
-	"github.com/bcicen/ctop/config"
-	"github.com/bcicen/ctop/models"
 	"github.com/opencontainers/runc/libcontainer"
 	"github.com/opencontainers/runc/libcontainer/cgroups"
+	"github.com/opencontainers/runc/types"
+
+	"github.com/bcicen/ctop/models"
 )
 
 // Runc collector
@@ -22,7 +23,6 @@ type Runc struct {
 	interval   int // collection interval, in seconds
 	lastCpu    float64
 	lastSysCpu float64
-	scaleCpu   bool
 }
 
 func NewRunc(libc libcontainer.Container) *Runc {
@@ -31,7 +31,6 @@ func NewRunc(libc libcontainer.Container) *Runc {
 		id:       libc.ID(),
 		libc:     libc,
 		interval: 1,
-		scaleCpu: config.GetSwitchVal("scaleCpu"),
 	}
 	return c
 }
@@ -47,6 +46,7 @@ func (c *Runc) Start() {
 }
 
 func (c *Runc) Stop() {
+	c.running = false
 	c.done = true
 }
 
@@ -86,18 +86,15 @@ func (c *Runc) run() {
 
 func (c *Runc) ReadCPU(stats *cgroups.Stats) {
 	u := stats.CpuStats.CpuUsage
-	ncpus := float64(len(u.PercpuUsage))
+	ncpus := uint8(len(u.PercpuUsage))
 	total := float64(u.TotalUsage)
 	system := float64(getSysCPUUsage())
 
 	cpudiff := total - c.lastCpu
 	syscpudiff := system - c.lastSysCpu
 
-	if c.scaleCpu {
-		c.CPUUtil = round((cpudiff / syscpudiff * 100))
-	} else {
-		c.CPUUtil = round((cpudiff / syscpudiff * 100) * ncpus)
-	}
+	c.NCpus = ncpus
+	c.CPUUtil = percent(cpudiff, syscpudiff)
 	c.lastCpu = total
 	c.lastSysCpu = system
 	c.Pids = int(stats.PidsStats.Current)
@@ -112,7 +109,7 @@ func (c *Runc) ReadMem(stats *cgroups.Stats) {
 	c.MemPercent = percent(float64(c.MemUsage), float64(c.MemLimit))
 }
 
-func (c *Runc) ReadNet(interfaces []*libcontainer.NetworkInterface) {
+func (c *Runc) ReadNet(interfaces []*types.NetworkInterface) {
 	var rx, tx int64
 	for _, network := range interfaces {
 		rx += int64(network.RxBytes)

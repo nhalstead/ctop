@@ -1,7 +1,7 @@
 package config
 
 // defaults
-var switches = []*Switch{
+var defaultSwitches = []*Switch{
 	&Switch{
 		Key:   "sortReversed",
 		Val:   false,
@@ -22,11 +22,6 @@ var switches = []*Switch{
 		Val:   true,
 		Label: "Enable status header",
 	},
-	&Switch{
-		Key:   "scaleCpu",
-		Val:   false,
-		Label: "Show CPU as %% of system total",
-	},
 }
 
 type Switch struct {
@@ -35,8 +30,11 @@ type Switch struct {
 	Label string
 }
 
-// Return Switch by key
+// GetSwitch returns Switch by key
 func GetSwitch(k string) *Switch {
+	lock.RLock()
+	defer lock.RUnlock()
+
 	for _, sw := range GlobalSwitches {
 		if sw.Key == k {
 			return sw
@@ -45,15 +43,19 @@ func GetSwitch(k string) *Switch {
 	return &Switch{} // default
 }
 
-// Return Switch value by key
+// GetSwitchVal returns Switch value by key
 func GetSwitchVal(k string) bool {
 	return GetSwitch(k).Val
 }
 
 func UpdateSwitch(k string, val bool) {
 	sw := GetSwitch(k)
+
+	lock.Lock()
+	defer lock.Unlock()
+
 	if sw.Val != val {
-		log.Noticef("config change: %s: %t -> %t", k, sw.Val, val)
+		log.Noticef("config change [%s]: %t -> %t", k, sw.Val, val)
 		sw.Val = val
 	}
 }
@@ -61,8 +63,11 @@ func UpdateSwitch(k string, val bool) {
 // Toggle a boolean switch
 func Toggle(k string) {
 	sw := GetSwitch(k)
-	newVal := sw.Val != true
-	log.Noticef("config change: %s: %t -> %t", k, sw.Val, newVal)
-	sw.Val = newVal
+
+	lock.Lock()
+	defer lock.Unlock()
+
+	sw.Val = !sw.Val
+	log.Noticef("config change [%s]: %t -> %t", k, !sw.Val, sw.Val)
 	//log.Errorf("ignoring toggle for non-existant switch: %s", k)
 }

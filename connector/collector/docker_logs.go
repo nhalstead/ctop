@@ -46,9 +46,9 @@ func (l *DockerLogs) Stream() chan models.Log {
 	go func() {
 		scanner := bufio.NewScanner(r)
 		for scanner.Scan() {
-			parts := strings.Split(scanner.Text(), " ")
+			parts := strings.SplitN(scanner.Text(), " ", 2)
 			ts := l.parseTime(parts[0])
-			logCh <- models.Log{ts, strings.Join(parts[1:], " ")}
+			logCh <- models.Log{Timestamp: ts, Message: parts[1]}
 		}
 	}()
 
@@ -62,10 +62,8 @@ func (l *DockerLogs) Stream() chan models.Log {
 	}()
 
 	go func() {
-		select {
-		case <-l.done:
-			cancel()
-		}
+		<-l.done
+		cancel()
 	}()
 
 	log.Infof("log reader started for container: %s", l.id)
@@ -75,10 +73,26 @@ func (l *DockerLogs) Stream() chan models.Log {
 func (l *DockerLogs) Stop() { l.done <- true }
 
 func (l *DockerLogs) parseTime(s string) time.Time {
-	ts, err := time.Parse("2006-01-02T15:04:05.000000000Z", s)
-	if err != nil {
-		log.Errorf("failed to parse container log: %s", err)
-		ts = time.Now()
+	ts, err := time.Parse(time.RFC3339Nano, s)
+	if err == nil {
+		return ts
 	}
-	return ts
+
+	ts, err2 := time.Parse(time.RFC3339Nano, l.stripPfx(s))
+	if err2 == nil {
+		return ts
+	}
+
+	log.Errorf("failed to parse container log: %s", err)
+	log.Errorf("failed to parse container log2: %s", err2)
+	return time.Now()
+}
+
+// attempt to strip message header prefix from a given raw docker log string
+func (l *DockerLogs) stripPfx(s string) string {
+	b := []byte(s)
+	if len(b) > 8 {
+		return string(b[8:])
+	}
+	return s
 }

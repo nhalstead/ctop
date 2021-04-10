@@ -18,20 +18,19 @@ type Single struct {
 	Cpu   *Cpu
 	Mem   *Mem
 	IO    *IO
+	Env   *Env
 	X, Y  int
 	Width int
 }
 
-func NewSingle(id string) *Single {
-	if len(id) > 12 {
-		id = id[:12]
-	}
+func NewSingle() *Single {
 	return &Single{
-		Info:  NewInfo(id),
+		Info:  NewInfo(),
 		Net:   NewNet(),
 		Cpu:   NewCpu(),
 		Mem:   NewMem(),
 		IO:    NewIO(),
+		Env:   NewEnv(),
 		Width: ui.TermWidth(),
 	}
 }
@@ -52,8 +51,16 @@ func (e *Single) Down() {
 	}
 }
 
-func (e *Single) SetWidth(w int)      { e.Width = w }
-func (e *Single) SetMeta(k, v string) { e.Info.Set(k, v) }
+func (e *Single) SetWidth(w int) { e.Width = w }
+func (e *Single) SetMeta(m models.Meta) {
+	for k, v := range m {
+		if k == "[ENV-VAR]" {
+			e.Env.Set(v)
+		} else {
+			e.Info.Set(k, v)
+		}
+	}
+}
 
 func (e *Single) SetMetrics(m models.Metrics) {
 	e.Cpu.Update(m.CPUUtil)
@@ -62,13 +69,14 @@ func (e *Single) SetMetrics(m models.Metrics) {
 	e.IO.Update(m.IOBytesRead, m.IOBytesWrite)
 }
 
-// Return total column height
+// GetHeight returns total column height
 func (e *Single) GetHeight() (h int) {
 	h += e.Info.Height
 	h += e.Net.Height
 	h += e.Cpu.Height
 	h += e.Mem.Height
 	h += e.IO.Height
+	h += e.Env.Height
 	return h
 }
 
@@ -103,6 +111,7 @@ func (e *Single) Buffer() ui.Buffer {
 	buf.Merge(e.Mem.Buffer())
 	buf.Merge(e.Net.Buffer())
 	buf.Merge(e.IO.Buffer())
+	buf.Merge(e.Env.Buffer())
 	return buf
 }
 
@@ -113,6 +122,7 @@ func (e *Single) all() []ui.GridBufferer {
 		e.Mem,
 		e.Net,
 		e.IO,
+		e.Env,
 	}
 }
 

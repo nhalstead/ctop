@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -13,27 +14,36 @@ var (
 	xdgRe = regexp.MustCompile("^XDG_*")
 )
 
-type ConfigFile struct {
+type File struct {
 	Options map[string]string `toml:"options"`
 	Toggles map[string]bool   `toml:"toggles"`
 }
 
-func exportConfig() ConfigFile {
-	c := ConfigFile{
+func exportConfig() File {
+	// update columns param from working config
+	Update("columns", ColumnsString())
+
+	lock.RLock()
+	defer lock.RUnlock()
+
+	c := File{
 		Options: make(map[string]string),
 		Toggles: make(map[string]bool),
 	}
+
 	for _, p := range GlobalParams {
 		c.Options[p.Key] = p.Val
 	}
 	for _, sw := range GlobalSwitches {
 		c.Toggles[sw.Key] = sw.Val
 	}
+
 	return c
 }
 
+//
 func Read() error {
-	var config ConfigFile
+	var config File
 
 	path, err := getConfigPath()
 	if err != nil {
@@ -43,13 +53,26 @@ func Read() error {
 	if _, err := toml.DecodeFile(path, &config); err != nil {
 		return err
 	}
-
 	for k, v := range config.Options {
 		Update(k, v)
 	}
 	for k, v := range config.Toggles {
 		UpdateSwitch(k, v)
 	}
+
+	// set working column config, if provided
+	colStr := GetVal("columns")
+	if len(colStr) > 0 {
+		var colNames []string
+		for _, s := range strings.Split(colStr, ",") {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				colNames = append(colNames, s)
+			}
+		}
+		SetColumns(colNames)
+	}
+
 	return nil
 }
 
@@ -59,12 +82,19 @@ func Write() (path string, err error) {
 		return path, err
 	}
 
-	cfgdir := basedir(path)
+	cfgdir := filepath.Dir(path)
 	// create config dir if not exist
 	if _, err := os.Stat(cfgdir); err != nil {
 		err = os.MkdirAll(cfgdir, 0755)
 		if err != nil {
 			return path, fmt.Errorf("failed to create config dir [%s]: %s", cfgdir, err)
+		}
+	}
+
+	// remove prior to writing new file
+	if err := os.Remove(path); err != nil {
+		if !os.IsNotExist(err) {
+			return path, err
 		}
 	}
 
@@ -111,9 +141,4 @@ func xdgSupport() bool {
 		}
 	}
 	return false
-}
-
-func basedir(path string) string {
-	parts := strings.Split(path, "/")
-	return strings.Join((parts[0 : len(parts)-1]), "/")
 }

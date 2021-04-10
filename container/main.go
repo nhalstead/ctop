@@ -13,12 +13,16 @@ var (
 	log = logging.Init()
 )
 
+const (
+	running = "running"
+)
+
 // Metrics and metadata representing a container
 type Container struct {
 	models.Metrics
 	Id        string
-	Meta      map[string]string
-	Widgets   *compact.Compact
+	Meta      models.Meta
+	Widgets   *compact.CompactRow
 	Display   bool // display this container in compact view
 	updater   cwidgets.WidgetUpdater
 	collector collector.Collector
@@ -26,11 +30,11 @@ type Container struct {
 }
 
 func New(id string, collector collector.Collector, manager manager.Manager) *Container {
-	widgets := compact.NewCompact(id)
+	widgets := compact.NewCompactRow()
 	return &Container{
 		Metrics:   models.NewMetrics(),
 		Id:        id,
-		Meta:      make(map[string]string),
+		Meta:      models.NewMeta("id", id[:12]),
 		Widgets:   widgets,
 		updater:   widgets,
 		collector: collector,
@@ -38,39 +42,40 @@ func New(id string, collector collector.Collector, manager manager.Manager) *Con
 	}
 }
 
+func (c *Container) RecreateWidgets() {
+	c.SetUpdater(cwidgets.NullWidgetUpdater{})
+	c.Widgets = compact.NewCompactRow()
+	c.SetUpdater(c.Widgets)
+}
+
 func (c *Container) SetUpdater(u cwidgets.WidgetUpdater) {
 	c.updater = u
-	for k, v := range c.Meta {
-		c.updater.SetMeta(k, v)
-	}
+	c.updater.SetMeta(c.Meta)
 }
 
 func (c *Container) SetMeta(k, v string) {
 	c.Meta[k] = v
-	c.updater.SetMeta(k, v)
+	c.updater.SetMeta(c.Meta)
 }
 
 func (c *Container) GetMeta(k string) string {
-	if v, ok := c.Meta[k]; ok {
-		return v
-	}
-	return ""
+	return c.Meta.Get(k)
 }
 
 func (c *Container) SetState(s string) {
 	c.SetMeta("state", s)
 	// start collector, if needed
-	if s == "running" && !c.collector.Running() {
+	if s == running && !c.collector.Running() {
 		c.collector.Start()
 		c.Read(c.collector.Stream())
 	}
 	// stop collector, if needed
-	if s != "running" && c.collector.Running() {
+	if s != running && c.collector.Running() {
 		c.collector.Stop()
 	}
 }
 
-// Return container log collector
+// Logs returns container log collector
 func (c *Container) Logs() collector.LogCollector {
 	return c.collector.Logs()
 }
@@ -90,18 +95,18 @@ func (c *Container) Read(stream chan models.Metrics) {
 }
 
 func (c *Container) Start() {
-	if c.Meta["state"] != "running" {
+	if c.Meta["state"] != running {
 		if err := c.manager.Start(); err != nil {
 			log.Warningf("container %s: %v", c.Id, err)
 			log.StatusErr(err)
 			return
 		}
-		c.SetState("running")
+		c.SetState(running)
 	}
 }
 
 func (c *Container) Stop() {
-	if c.Meta["state"] == "running" {
+	if c.Meta["state"] == running {
 		if err := c.manager.Stop(); err != nil {
 			log.Warningf("container %s: %v", c.Id, err)
 			log.StatusErr(err)
@@ -119,7 +124,7 @@ func (c *Container) Remove() {
 }
 
 func (c *Container) Pause() {
-	if c.Meta["state"] == "running" {
+	if c.Meta["state"] == running {
 		if err := c.manager.Pause(); err != nil {
 			log.Warningf("container %s: %v", c.Id, err)
 			log.StatusErr(err)
@@ -136,16 +141,20 @@ func (c *Container) Unpause() {
 			log.StatusErr(err)
 			return
 		}
-		c.SetState("running")
+		c.SetState(running)
 	}
 }
 
 func (c *Container) Restart() {
-	if c.Meta["state"] == "running" {
+	if c.Meta["state"] == running {
 		if err := c.manager.Restart(); err != nil {
 			log.Warningf("container %s: %v", c.Id, err)
 			log.StatusErr(err)
 			return
 		}
 	}
+}
+
+func (c *Container) Exec(cmd []string) error {
+	return c.manager.Exec(cmd)
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/bcicen/ctop/config"
@@ -25,6 +26,8 @@ var helpDialog = []menu.Item{
 	{"[r] - reverse container sort order", ""},
 	{"[o] - open single view", ""},
 	{"[l] - view container logs ([t] to toggle timestamp when open)", ""},
+	{"[e] - exec shell", ""},
+	{"[c] - configure columns", ""},
 	{"[S] - save current configuration to file", ""},
 	{"[q] - exit ctop", ""},
 }
@@ -103,7 +106,90 @@ func SortMenu() MenuFn {
 	HandleKeys("exit", ui.StopLoop)
 
 	ui.Handle("/sys/kbd/<enter>", func(ui.Event) {
-		config.Update("sortField", m.SelectedItem().Val)
+		config.Update("sortField", m.SelectedValue())
+		ui.StopLoop()
+	})
+
+	ui.Render(m)
+	ui.Loop()
+	return nil
+}
+
+func ColumnsMenu() MenuFn {
+	const (
+		enabledStr  = "[X]"
+		disabledStr = "[ ]"
+		padding     = 2
+	)
+
+	ui.Clear()
+	ui.DefaultEvtStream.ResetHandlers()
+	defer ui.DefaultEvtStream.ResetHandlers()
+
+	m := menu.NewMenu()
+	m.Selectable = true
+	m.SortItems = false
+	m.BorderLabel = "Columns"
+	m.SubText = "Re-order: <Page Up> / <Page Down>"
+
+	rebuild := func() {
+		// get padding for right alignment of enabled status
+		var maxLen int
+		for _, col := range config.GlobalColumns {
+			if len(col.Label) > maxLen {
+				maxLen = len(col.Label)
+			}
+		}
+		maxLen += padding
+
+		// rebuild menu items
+		m.ClearItems()
+		for _, col := range config.GlobalColumns {
+			txt := col.Label + strings.Repeat(" ", maxLen-len(col.Label))
+			if col.Enabled {
+				txt += enabledStr
+			} else {
+				txt += disabledStr
+			}
+			m.AddItems(menu.Item{col.Name, txt})
+		}
+	}
+
+	upFn := func() {
+		config.ColumnLeft(m.SelectedValue())
+		m.Up()
+		rebuild()
+	}
+
+	downFn := func() {
+		config.ColumnRight(m.SelectedValue())
+		m.Down()
+		rebuild()
+	}
+
+	toggleFn := func() {
+		config.ColumnToggle(m.SelectedValue())
+		rebuild()
+	}
+
+	rebuild()
+
+	HandleKeys("up", m.Up)
+	HandleKeys("down", m.Down)
+	HandleKeys("enter", toggleFn)
+	HandleKeys("pgup", upFn)
+	HandleKeys("pgdown", downFn)
+
+	ui.Handle("/sys/kbd/x", func(ui.Event) { toggleFn() })
+	ui.Handle("/sys/kbd/<enter>", func(ui.Event) { toggleFn() })
+
+	HandleKeys("exit", func() {
+		cSource, err := cursor.cSuper.Get()
+		if err == nil {
+			for _, c := range cSource.All() {
+				c.RecreateWidgets()
+			}
+		}
 		ui.StopLoop()
 	})
 
@@ -126,55 +212,111 @@ func ContainerMenu() MenuFn {
 	m.BorderLabel = "Menu"
 
 	items := []menu.Item{
-		menu.Item{Val: "single", Label: "single view"},
-		menu.Item{Val: "logs", Label: "log view"},
+		menu.Item{Val: "single", Label: "[o] single view"},
+		menu.Item{Val: "logs", Label: "[l] log view"},
 	}
 
 	if c.Meta["state"] == "running" {
-		items = append(items, menu.Item{Val: "stop", Label: "stop"})
-		items = append(items, menu.Item{Val: "pause", Label: "pause"})
-		items = append(items, menu.Item{Val: "restart", Label: "restart"})
+		items = append(items, menu.Item{Val: "stop", Label: "[s] stop"})
+		items = append(items, menu.Item{Val: "pause", Label: "[p] pause"})
+		items = append(items, menu.Item{Val: "restart", Label: "[r] restart"})
+		items = append(items, menu.Item{Val: "exec", Label: "[e] exec shell"})
 	}
 	if c.Meta["state"] == "exited" || c.Meta["state"] == "created" {
-		items = append(items, menu.Item{Val: "start", Label: "start"})
-		items = append(items, menu.Item{Val: "remove", Label: "remove"})
+		items = append(items, menu.Item{Val: "start", Label: "[s] start"})
+		items = append(items, menu.Item{Val: "remove", Label: "[R] remove"})
 	}
 	if c.Meta["state"] == "paused" {
-		items = append(items, menu.Item{Val: "unpause", Label: "unpause"})
+		items = append(items, menu.Item{Val: "unpause", Label: "[p] unpause"})
 	}
-	items = append(items, menu.Item{Val: "cancel", Label: "cancel"})
+	items = append(items, menu.Item{Val: "cancel", Label: "[c] cancel"})
 
 	m.AddItems(items...)
 	ui.Render(m)
 
-	var nextMenu MenuFn
 	HandleKeys("up", m.Up)
 	HandleKeys("down", m.Down)
+
+	var selected string
+
+	// shortcuts
+	ui.Handle("/sys/kbd/o", func(ui.Event) {
+		selected = "single"
+		ui.StopLoop()
+	})
+	ui.Handle("/sys/kbd/l", func(ui.Event) {
+		selected = "logs"
+		ui.StopLoop()
+	})
+	if c.Meta["state"] != "paused" {
+		ui.Handle("/sys/kbd/s", func(ui.Event) {
+			if c.Meta["state"] == "running" {
+				selected = "stop"
+			} else {
+				selected = "start"
+			}
+			ui.StopLoop()
+		})
+	}
+	if c.Meta["state"] != "exited" && c.Meta["state"] != "created" {
+		ui.Handle("/sys/kbd/p", func(ui.Event) {
+			if c.Meta["state"] == "paused" {
+				selected = "unpause"
+			} else {
+				selected = "pause"
+			}
+			ui.StopLoop()
+		})
+	}
+	if c.Meta["state"] == "running" {
+		ui.Handle("/sys/kbd/e", func(ui.Event) {
+			selected = "exec"
+			ui.StopLoop()
+		})
+		ui.Handle("/sys/kbd/r", func(ui.Event) {
+			selected = "restart"
+			ui.StopLoop()
+		})
+	}
+	ui.Handle("/sys/kbd/R", func(ui.Event) {
+		selected = "remove"
+		ui.StopLoop()
+	})
+	ui.Handle("/sys/kbd/c", func(ui.Event) {
+		ui.StopLoop()
+	})
+
 	ui.Handle("/sys/kbd/<enter>", func(ui.Event) {
-		switch m.SelectedItem().Val {
-		case "single":
-			nextMenu = SingleView
-		case "logs":
-			nextMenu = LogMenu
-		case "start":
-			nextMenu = Confirm(confirmTxt("start", c.GetMeta("name")), c.Start)
-		case "stop":
-			nextMenu = Confirm(confirmTxt("stop", c.GetMeta("name")), c.Stop)
-		case "remove":
-			nextMenu = Confirm(confirmTxt("remove", c.GetMeta("name")), c.Remove)
-		case "pause":
-			nextMenu = Confirm(confirmTxt("pause", c.GetMeta("name")), c.Pause)
-		case "unpause":
-			nextMenu = Confirm(confirmTxt("unpause", c.GetMeta("name")), c.Unpause)
-		case "restart":
-			nextMenu = Confirm(confirmTxt("restart", c.GetMeta("name")), c.Restart)
-		}
+		selected = m.SelectedValue()
 		ui.StopLoop()
 	})
 	ui.Handle("/sys/kbd/", func(ui.Event) {
 		ui.StopLoop()
 	})
 	ui.Loop()
+
+	var nextMenu MenuFn
+	switch selected {
+	case "single":
+		nextMenu = SingleView
+	case "logs":
+		nextMenu = LogMenu
+	case "exec":
+		nextMenu = ExecShell
+	case "start":
+		nextMenu = Confirm(confirmTxt("start", c.GetMeta("name")), c.Start)
+	case "stop":
+		nextMenu = Confirm(confirmTxt("stop", c.GetMeta("name")), c.Stop)
+	case "remove":
+		nextMenu = Confirm(confirmTxt("remove", c.GetMeta("name")), c.Remove)
+	case "pause":
+		nextMenu = Confirm(confirmTxt("pause", c.GetMeta("name")), c.Pause)
+	case "unpause":
+		nextMenu = Confirm(confirmTxt("unpause", c.GetMeta("name")), c.Unpause)
+	case "restart":
+		nextMenu = Confirm(confirmTxt("restart", c.GetMeta("name")), c.Restart)
+	}
+
 	return nextMenu
 }
 
@@ -204,6 +346,31 @@ func LogMenu() MenuFn {
 		ui.StopLoop()
 	})
 	ui.Loop()
+	return nil
+}
+
+func ExecShell() MenuFn {
+	c := cursor.Selected()
+
+	if c == nil {
+		return nil
+	}
+
+	ui.DefaultEvtStream.ResetHandlers()
+	defer ui.DefaultEvtStream.ResetHandlers()
+	// Detect and execute default shell in container.
+	// Execute Ash shell command: /bin/sh -c
+	// Reset colors: printf '\e[0m\e[?25h'
+	// Clear screen
+	// Run default shell for the user. It's configured in /etc/passwd and looks like root:x:0:0:root:/root:/bin/bash:
+	//  1. Get current user id: id -un
+	//  2. Find user's line in /etc/passwd by grep
+	//  3. Extract default user's shell by cutting seven's column separated by :
+	//  4. Execute the shell path with eval
+	if err := c.Exec([]string{"/bin/sh", "-c", "printf '\\e[0m\\e[?25h' && clear && eval `grep ^$(id -un): /etc/passwd | cut -d : -f 7-`"}); err != nil {
+		log.StatusErr(err)
+	}
+
 	return nil
 }
 
@@ -246,7 +413,7 @@ func Confirm(txt string, fn func()) MenuFn {
 		ui.Handle("/sys/kbd/y", func(ui.Event) { yes() })
 
 		ui.Handle("/sys/kbd/<enter>", func(ui.Event) {
-			switch m.SelectedItem().Val {
+			switch m.SelectedValue() {
 			case "cancel":
 				no()
 			case "yes":

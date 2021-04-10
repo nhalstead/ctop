@@ -7,7 +7,31 @@ type Log struct {
 	Message   string
 }
 
+type Meta map[string]string
+
+// NewMeta returns an initialized Meta map.
+// An optional series of key, values may be provided to populate the map prior to returning
+func NewMeta(kvs ...string) Meta {
+	m := make(Meta)
+
+	var i int
+	for i < len(kvs)-1 {
+		m[kvs[i]] = kvs[i+1]
+		i += 2
+	}
+
+	return m
+}
+
+func (m Meta) Get(k string) string {
+	if s, ok := m[k]; ok {
+		return s
+	}
+	return ""
+}
+
 type Metrics struct {
+	NCpus        uint8
 	CPUUtil      int
 	NetTx        int64
 	NetRx        int64
