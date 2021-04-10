@@ -3,13 +3,13 @@ package connector
 import (
 	"fmt"
 	"github.com/op/go-logging"
-	"strings"
-	"sync"
-
 	"github.com/bcicen/ctop/connector/collector"
 	"github.com/bcicen/ctop/connector/manager"
 	"github.com/bcicen/ctop/container"
 	api "github.com/fsouza/go-dockerclient"
+	"strings"
+	"sync"
+	"time"
 )
 
 func init() { enabled["docker"] = NewDocker }
@@ -139,6 +139,23 @@ func portsFormat(ports map[api.Port][]api.PortBinding) string {
 	return strings.Join(append(exposed, published...), "\n")
 }
 
+func webPort(ports map[api.Port][]api.PortBinding) string {
+	for _, v := range ports {
+		if len(v) == 0 {
+			continue
+		}
+		for _, binding := range v {
+			publishedIp := binding.HostIP
+			if publishedIp == "0.0.0.0" {
+				publishedIp = "localhost"
+			}
+			publishedWebPort := fmt.Sprintf("%s:%s", publishedIp, binding.HostPort)
+			return publishedWebPort
+		}
+	}
+	return ""
+}
+
 func ipsFormat(networks map[string]api.ContainerNetwork) string {
 	var ips []string
 
@@ -164,7 +181,12 @@ func (cm *Docker) refresh(c *container.Container) {
 	c.SetMeta("image", insp.Config.Image)
 	c.SetMeta("IPs", ipsFormat(insp.NetworkSettings.Networks))
 	c.SetMeta("ports", portsFormat(insp.NetworkSettings.Ports))
+	webPort := webPort(insp.NetworkSettings.Ports)
+	if webPort != "" {
+		c.SetMeta("Web Port", webPort)
+	}
 	c.SetMeta("created", insp.Created.Format("Mon Jan 2 15:04:05 2006"))
+	c.SetMeta("uptime", calcUptime(insp))
 	c.SetMeta("health", insp.State.Health.Status)
 	c.SetMeta("[ENV-VAR]", strings.Join(insp.Config.Env, ";"))
 	c.SetState(insp.State.Status)
@@ -181,6 +203,15 @@ func (cm *Docker) inspect(id string) (insp *api.Container, found bool, failed bo
 		return c, false, true
 	}
 	return c, true, false
+}
+
+func calcUptime(insp *api.Container) string {
+	endTime := insp.State.FinishedAt
+	if endTime.IsZero() {
+		endTime = time.Now()
+	}
+	uptime := endTime.Sub(insp.State.StartedAt)
+	return uptime.Truncate(time.Second).String()
 }
 
 // Mark all container IDs for refresh

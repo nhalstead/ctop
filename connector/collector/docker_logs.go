@@ -34,13 +34,12 @@ func (l *DockerLogs) Stream() chan models.Log {
 		Context:      ctx,
 		Container:    l.id,
 		OutputStream: w,
-		//ErrorStream:  w,
-		Stdout:      true,
-		Stderr:      true,
-		Tail:        "20",
-		Follow:      true,
-		Timestamps:  true,
-		RawTerminal: true,
+		ErrorStream:  w,
+		Stdout:       true,
+		Stderr:       true,
+		Tail:         "100",
+		Follow:       true,
+		Timestamps:   true,
 	}
 
 	// read io pipe into channel
