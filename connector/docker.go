@@ -2,6 +2,7 @@ package connector
 
 import (
 	"fmt"
+	"github.com/op/go-logging"
 	"github.com/bcicen/ctop/connector/collector"
 	"github.com/bcicen/ctop/connector/manager"
 	"github.com/bcicen/ctop/container"
@@ -13,10 +14,25 @@ import (
 
 func init() { enabled["docker"] = NewDocker }
 
+var actionToStatus = map[string]string{
+	"start":   "running",
+	"die":     "exited",
+	"stop":    "exited",
+	"pause":   "paused",
+	"unpause": "running",
+}
+
+type StatusUpdate struct {
+	Cid    string
+	Field  string // "status" or "health"
+	Status string
+}
+
 type Docker struct {
 	client       *api.Client
 	containers   map[string]*container.Container
 	needsRefresh chan string // container IDs requiring refresh
+	statuses     chan StatusUpdate
 	closed       chan struct{}
 	lock         sync.RWMutex
 }
@@ -31,6 +47,7 @@ func NewDocker() (Connector, error) {
 		client:       client,
 		containers:   make(map[string]*container.Container),
 		needsRefresh: make(chan string, 60),
+		statuses:     make(chan StatusUpdate, 60),
 		closed:       make(chan struct{}),
 		lock:         sync.RWMutex{},
 	}
@@ -48,6 +65,7 @@ func NewDocker() (Connector, error) {
 	log.Debugf("docker-connector ServerVersion: %s", info.ServerVersion)
 
 	go cm.Loop()
+	go cm.LoopStatuses()
 	cm.refreshAll()
 	go cm.watchEvents()
 	return cm, nil
@@ -67,15 +85,45 @@ func (cm *Docker) watchEvents() {
 			continue
 		}
 
-		actionName := strings.Split(e.Action, ":")[0]
+		actionName := e.Action
+		// fast skip all exec_* events: exec_create, exec_start, exec_die
+		if strings.HasPrefix(actionName, "exec_") {
+			continue
+		}
+		// Action may have additional param i.e. "health_status: healthy"
+		// We need to strip to have only action name
+		sepIdx := strings.Index(actionName, ": ")
+		if sepIdx != -1 {
+			actionName = actionName[:sepIdx]
+		}
 
 		switch actionName {
-		case "start", "die", "pause", "unpause", "health_status":
-			log.Debugf("handling docker event: action=%s id=%s", e.Action, e.ID)
+		// most frequent event is a health checks
+		case "health_status":
+			healthStatus := e.Action[sepIdx+2:]
+			if log.IsEnabledFor(logging.DEBUG) {
+				log.Debugf("handling docker event: action=health_status id=%s %s", e.ID, healthStatus)
+			}
+			cm.statuses <- StatusUpdate{e.ID, "health", healthStatus}
+		case "create":
+			if log.IsEnabledFor(logging.DEBUG) {
+				log.Debugf("handling docker event: action=create id=%s", e.ID)
+			}
 			cm.needsRefresh <- e.ID
 		case "destroy":
-			log.Debugf("handling docker event: action=%s id=%s", e.Action, e.ID)
+			if log.IsEnabledFor(logging.DEBUG) {
+				log.Debugf("handling docker event: action=destroy id=%s", e.ID)
+			}
 			cm.delByID(e.ID)
+		default:
+			// check if this action changes status e.g. start -> running
+			status := actionToStatus[actionName]
+			if status != "" {
+				if log.IsEnabledFor(logging.DEBUG) {
+					log.Debugf("handling docker event: action=%s id=%s %s", actionName, e.ID, status)
+				}
+				cm.statuses <- StatusUpdate{e.ID, "status", status}
+			}
 		}
 	}
 	log.Info("docker event listener exited")
@@ -112,9 +160,12 @@ func ipsFormat(networks map[string]api.ContainerNetwork) string {
 }
 
 func (cm *Docker) refresh(c *container.Container) {
-	insp := cm.inspect(c.Id)
+	insp, found, failed := cm.inspect(c.Id)
+	if failed {
+		return
+	}
 	// remove container if no longer exists
-	if insp == nil {
+	if !found {
 		cm.delByID(c.Id)
 		return
 	}
@@ -125,20 +176,21 @@ func (cm *Docker) refresh(c *container.Container) {
 	c.SetMeta("created", insp.Created.Format("Mon Jan 2 15:04:05 2006"))
 	c.SetMeta("uptime", calcUptime(insp))
 	c.SetMeta("health", insp.State.Health.Status)
-	for _, env := range insp.Config.Env {
-		c.SetMeta("[ENV-VAR]", env)
-	}
+	c.SetMeta("[ENV-VAR]", strings.Join(insp.Config.Env, ";"))
 	c.SetState(insp.State.Status)
 }
 
-func (cm *Docker) inspect(id string) *api.Container {
+func (cm *Docker) inspect(id string) (insp *api.Container, found bool, failed bool) {
 	c, err := cm.client.InspectContainer(id)
 	if err != nil {
-		if _, ok := err.(*api.NoSuchContainer); !ok {
-			log.Errorf("%s (%T)", err.Error(), err)
+		if _, notFound := err.(*api.NoSuchContainer); notFound {
+			return c, false, false
 		}
+		// other error e.g. connection failed
+		log.Errorf("%s (%T)", err.Error(), err)
+		return c, false, true
 	}
-	return c
+	return c, true, false
 }
 
 func calcUptime(insp *api.Container) string {
@@ -173,6 +225,24 @@ func (cm *Docker) Loop() {
 		case id := <-cm.needsRefresh:
 			c := cm.MustGet(id)
 			cm.refresh(c)
+		case <-cm.closed:
+			return
+		}
+	}
+}
+
+func (cm *Docker) LoopStatuses() {
+	for {
+		select {
+		case statusUpdate := <-cm.statuses:
+			c, _ := cm.Get(statusUpdate.Cid)
+			if c != nil {
+				if statusUpdate.Field == "health" {
+					c.SetMeta("health", statusUpdate.Status)
+				} else {
+					c.SetState(statusUpdate.Status)
+				}
+			}
 		case <-cm.closed:
 			return
 		}
@@ -228,5 +298,5 @@ func (cm *Docker) All() (containers container.Containers) {
 
 // use primary container name
 func shortName(name string) string {
-	return strings.Replace(name, "/", "", 1)
+	return strings.TrimPrefix(name, "/")
 }

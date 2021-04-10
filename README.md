@@ -17,10 +17,24 @@ as well as a [single container view][single_view] for inspecting a specific cont
 
 Fetch the [latest release](https://github.com/bcicen/ctop/releases) for your platform:
 
-#### Linux
+#### Debian/Ubuntu
+
+Maintained by a [third party](https://packages.azlux.fr/)
+```bash
+echo "deb http://packages.azlux.fr/debian/ buster main" | sudo tee /etc/apt/sources.list.d/azlux.list
+wget -qO - https://azlux.fr/repo.gpg.key | sudo apt-key add -
+sudo apt update
+sudo apt install docker-ctop
+```
+
+#### Arch
+
+`ctop` is available for Arch in the [AUR](https://aur.archlinux.org/packages/ctop-bin/)
+
+#### Linux (Generic)
 
 ```bash
-sudo wget https://github.com/bcicen/ctop/releases/download/v0.7.4/ctop-0.7.4-linux-amd64 -O /usr/local/bin/ctop
+sudo wget https://github.com/bcicen/ctop/releases/download/v0.7.5/ctop-0.7.5-linux-amd64 -O /usr/local/bin/ctop
 sudo chmod +x /usr/local/bin/ctop
 ```
 
@@ -31,7 +45,7 @@ brew install ctop
 ```
 or
 ```bash
-sudo curl -Lo /usr/local/bin/ctop https://github.com/bcicen/ctop/releases/download/v0.7.4/ctop-0.7.4-darwin-amd64
+sudo curl -Lo /usr/local/bin/ctop https://github.com/bcicen/ctop/releases/download/v0.7.5/ctop-0.7.5-darwin-amd64
 sudo chmod +x /usr/local/bin/ctop
 ```
 
@@ -43,8 +57,6 @@ docker run --rm -ti \
   --volume /var/run/docker.sock:/var/run/docker.sock:ro \
   quay.io/vektorlab/ctop:latest
 ```
-
-`ctop` is also available for Arch in the [AUR](https://aur.archlinux.org/packages/ctop-bin/)
 
 ## Building
 
@@ -70,9 +82,7 @@ Option | Description
 `-i`  | invert default colors
 `-r`	| reverse container sort order
 `-s`  | select initial container sort field
-`-scale-cpu`	| show cpu as % of system total
 `-v`	| output version information and exit
-`-shell` | specify shell (default: sh)
 
 ### Keybindings
 
@@ -97,3 +107,7 @@ Option | Description
 [single_view]: _docs/single.md
 [release]: https://img.shields.io/github/release/bcicen/ctop.svg "ctop"
 [homebrew]: https://img.shields.io/homebrew/v/ctop.svg "ctop"
+
+## Alternatives
+
+See [Awesome Docker list](https://github.com/veggiemonk/awesome-docker/blob/master/README.md#terminal) for similar tools to work with Docker. 

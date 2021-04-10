@@ -23,12 +23,9 @@ type Single struct {
 	Width int
 }
 
-func NewSingle(id string) *Single {
-	if len(id) > 12 {
-		id = id[:12]
-	}
+func NewSingle() *Single {
 	return &Single{
-		Info:  NewInfo(id),
+		Info:  NewInfo(),
 		Net:   NewNet(),
 		Cpu:   NewCpu(),
 		Mem:   NewMem(),
@@ -58,7 +55,7 @@ func (e *Single) SetWidth(w int) { e.Width = w }
 func (e *Single) SetMeta(m models.Meta) {
 	for k, v := range m {
 		if k == "[ENV-VAR]" {
-			e.Env.Set(k, v)
+			e.Env.Set(v)
 		} else {
 			e.Info.Set(k, v)
 		}

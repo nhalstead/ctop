@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -66,7 +67,7 @@ func Read() error {
 		for _, s := range strings.Split(colStr, ",") {
 			s = strings.TrimSpace(s)
 			if s != "" {
-				colNames = append(colNames, strings.TrimSpace(s))
+				colNames = append(colNames, s)
 			}
 		}
 		SetColumns(colNames)
@@ -81,12 +82,19 @@ func Write() (path string, err error) {
 		return path, err
 	}
 
-	cfgdir := basedir(path)
+	cfgdir := filepath.Dir(path)
 	// create config dir if not exist
 	if _, err := os.Stat(cfgdir); err != nil {
 		err = os.MkdirAll(cfgdir, 0755)
 		if err != nil {
 			return path, fmt.Errorf("failed to create config dir [%s]: %s", cfgdir, err)
+		}
+	}
+
+	// remove prior to writing new file
+	if err := os.Remove(path); err != nil {
+		if !os.IsNotExist(err) {
+			return path, err
 		}
 	}
 
@@ -133,9 +141,4 @@ func xdgSupport() bool {
 		}
 	}
 	return false
-}
-
-func basedir(path string) string {
-	parts := strings.Split(path, "/")
-	return strings.Join((parts[0 : len(parts)-1]), "/")
 }

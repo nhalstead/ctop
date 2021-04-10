@@ -9,35 +9,44 @@ import (
 	ui "github.com/gizak/termui"
 )
 
-type NameCol struct {
+// Column that shows container's meta property i.e. name, id, image tc.
+type MetaCol struct {
 	*TextCol
+	metaName string
+}
+
+func (w *MetaCol) SetMeta(m models.Meta) {
+	w.setText(m.Get(w.metaName))
 }
 
 func NewNameCol() CompactCol {
-	return &NameCol{NewTextCol("NAME")}
-}
-
-func (w *NameCol) SetMeta(m models.Meta) {
-	w.Text = m.Get("name")
-	// truncate container id
-	if len(w.Text) > 12 {
-		w.Text = w.Text[:12]
-	}
-}
-
-type CIDCol struct {
-	*TextCol
+	c := &MetaCol{NewTextCol("NAME"), "name"}
+	c.fWidth = 30
+	return c
 }
 
 func NewCIDCol() CompactCol {
-	return &CIDCol{NewTextCol("CID")}
+	c := &MetaCol{NewTextCol("CID"), "id"}
+	c.fWidth = 12
+	return c
 }
 
-func (w *CIDCol) SetMeta(m models.Meta) {
-	w.Text = m.Get("id")
-	if len(w.Text) > 12 {
-		w.Text = w.Text[:12]
-	}
+func NewImageCol() CompactCol {
+	return &MetaCol{NewTextCol("IMAGE"), "image"}
+}
+
+func NewPortsCol() CompactCol {
+	return &MetaCol{NewTextCol("PORTS"), "ports"}
+}
+
+func NewIpsCol() CompactCol {
+	return &MetaCol{NewTextCol("IPs"), "IPs"}
+}
+
+func NewCreatedCol() CompactCol {
+	c := &MetaCol{NewTextCol("CREATED"), "created"}
+	c.fWidth = 19 // Year will be stripped e.g. "Thu Nov 26 07:44:03" without 2020 at end
+	return c
 }
 
 type NetCol struct {
@@ -50,7 +59,7 @@ func NewNetCol() CompactCol {
 
 func (w *NetCol) SetMetrics(m models.Metrics) {
 	label := fmt.Sprintf("%s / %s", cwidgets.ByteFormat64Short(m.NetRx), cwidgets.ByteFormat64Short(m.NetTx))
-	w.Text = label
+	w.setText(label)
 }
 
 type IOCol struct {
@@ -63,7 +72,7 @@ func NewIOCol() CompactCol {
 
 func (w *IOCol) SetMetrics(m models.Metrics) {
 	label := fmt.Sprintf("%s / %s", cwidgets.ByteFormat64Short(m.IOBytesRead), cwidgets.ByteFormat64Short(m.IOBytesWrite))
-	w.Text = label
+	w.setText(label)
 }
 
 type PIDCol struct {
@@ -77,7 +86,7 @@ func NewPIDCol() CompactCol {
 }
 
 func (w *PIDCol) SetMetrics(m models.Metrics) {
-	w.Text = fmt.Sprintf("%d", m.Pids)
+	w.setText(fmt.Sprintf("%d", m.Pids))
 }
 
 type UptimeCol struct {
@@ -103,7 +112,12 @@ func NewTextCol(header string) *TextCol {
 	p.Border = false
 	p.Height = 1
 	p.Width = 20
-	return &TextCol{p, header, 0}
+
+	return &TextCol{
+		Par:    p,
+		header: header,
+		fWidth: 0,
+	}
 }
 
 func (w *TextCol) Highlight() {
@@ -118,8 +132,16 @@ func (w *TextCol) UnHighlight() {
 	w.TextBgColor = ui.ThemeAttr("par.text.bg")
 }
 
-func (w *TextCol) Reset()                    { w.Text = "-" }
+// TextCol implements CompactCol
+func (w *TextCol) Reset()                    { w.setText("-") }
 func (w *TextCol) SetMeta(models.Meta)       {}
 func (w *TextCol) SetMetrics(models.Metrics) {}
 func (w *TextCol) Header() string            { return w.header }
 func (w *TextCol) FixedWidth() int           { return w.fWidth }
+
+func (w *TextCol) setText(s string) {
+	if w.fWidth > 0 && len(s) > w.fWidth {
+		s = s[0:w.fWidth]
+	}
+	w.Text = s
+}
